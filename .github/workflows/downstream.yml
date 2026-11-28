@@ -46,8 +46,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           RECIPES: ${{ inputs.recipes }}
-        # No pipe into plan.jl: the default shell has no pipefail, so a failed diff would
-        # leave it nothing to plan and pass.
         run: |
           if [[ -n "${PR}" ]]; then
               gh pr diff "${PR}" --repo "${GITHUB_REPOSITORY}" --name-only > "${RUNNER_TEMP}/changed"
