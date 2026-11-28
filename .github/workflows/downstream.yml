@@ -61,7 +61,7 @@ jobs:
         with:
           name: staged-${{ matrix.recipe.key }}
           path: ${{ runner.temp }}/staged
-          retention-days: 7
+          retention-days: 1
 
   test:
     needs: [plan, build]
