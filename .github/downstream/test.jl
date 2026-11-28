@@ -3,7 +3,7 @@
 using Pkg
 
 staged, package = ARGS
-for tarball in readdir(joinpath(staged, "products"); join=true)
+for tarball in filter(!endswith(".json"), readdir(joinpath(staged, "products"); join=true))
     Pkg.Artifacts.create_artifact(dir -> Pkg.PlatformEngines.unpack(tarball, dir))
 end
 

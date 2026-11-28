@@ -1,27 +1,16 @@
-# Runs the tests of registered Julia packages against a pull request's build of the recipes
-# they depend on, on GitHub's runners. `.github/downstream_tests.toml` lists the packages to
-# test for each recipe directory; a pull request that changes nothing listed there runs only
-# the `plan` job.
-#
-# The pull request's recipe is built here with `--deploy=local`, for the platforms that the
-# `test` matrix covers, and each test installs the resulting artifacts from those tarballs.
-# This runs the pull request's code, as any pull_request workflow does, so it gets no
-# secrets and a read-only token.
+# Runs the tests of the packages in `.github/downstream_tests.toml` against a pull request's
+# build of the recipes it changes. It runs the pull request's code, so it gets no secrets and
+# a read-only token.
 name: Downstream
 
 on:
   pull_request:
-  workflow_dispatch:
-    inputs:
-      recipes:
-        description: 'Recipe directories to test, separated by spaces, e.g. "B/brotli"'
-        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: downstream-${{ github.event.pull_request.number || github.run_id }}
+  group: downstream-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -30,14 +19,10 @@ jobs:
     outputs:
       recipes: ${{ steps.plan.outputs.recipes }}
       tests: ${{ steps.plan.outputs.tests }}
-      julia_version: ${{ steps.plan.outputs.julia_version }}
     steps:
       - uses: actions/checkout@v7
         with:
-          sparse-checkout: |
-            .github
-            Manifest.toml
-          sparse-checkout-cone-mode: false
+          sparse-checkout: .github
       - uses: julia-actions/setup-julia@v3
         with:
           version: '1'
@@ -45,13 +30,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-          RECIPES: ${{ inputs.recipes }}
         run: |
-          if [[ -n "${PR}" ]]; then
-              gh pr diff "${PR}" --repo "${GITHUB_REPOSITORY}" --name-only > "${RUNNER_TEMP}/changed"
-          else
-              tr ' ' '\n' <<< "${RECIPES}" > "${RUNNER_TEMP}/changed"
-          fi
+          gh pr diff "${PR}" --repo "${GITHUB_REPOSITORY}" --name-only > "${RUNNER_TEMP}/changed"
           julia --color=yes .github/downstream/plan.jl < "${RUNNER_TEMP}/changed"
 
   build:
@@ -65,9 +45,11 @@ jobs:
         recipe: ${{ fromJSON(needs.plan.outputs.recipes) }}
     steps:
       - uses: actions/checkout@v7
+      - id: julia
+        run: echo "version=$(sed -n 's/^julia_version = "\(.*\)"$/\1/p' Manifest.toml)" >> "${GITHUB_OUTPUT}"
       - uses: julia-actions/setup-julia@v3
         with:
-          version: ${{ needs.plan.outputs.julia_version }}
+          version: ${{ steps.julia.outputs.version }}
       # BinaryBuilder's sandbox needs unprivileged user namespaces, which Ubuntu 24.04
       # restricts through AppArmor.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

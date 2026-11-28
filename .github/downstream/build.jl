@@ -1,7 +1,6 @@
 # Builds the recipe in directory ARGS[1] for the platforms that downstream.yml tests on, and
-# stages the JLLs it generates (`dev/<name>_jll`) and their tarballs (`products/`) in
-# directory ARGS[2].
-# Run it in the repository's root project, which BinaryBuilder runs in.
+# stages its JLLs (`dev/`) and tarballs (`products/`) in directory ARGS[2]. Run it in the
+# repository's root project.
 using JSON
 using Base.BinaryPlatforms
 
@@ -39,10 +38,5 @@ cd(recipe) do
         jll = readchomp(`$julia -e 'using BinaryBuilder; print(BinaryBuilder.codedir(ARGS[1]))' $name`)
         cp(jll, joinpath(staged, "dev", basename(jll)); force=true)
     end
-    mkpath(joinpath(staged, "products"))
-    for file in readdir("products")
-        if endswith(file, ".tar.gz") && !occursin("-logs.", file)
-            cp(joinpath("products", file), joinpath(staged, "products", file))
-        end
-    end
+    cp("products", joinpath(staged, "products"))
 end
