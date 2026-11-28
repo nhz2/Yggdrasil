@@ -1,0 +1,8 @@
+# Registered Julia packages whose tests run, on GitHub's runners, against a pull request's
+# build of a recipe whenever the pull request changes that recipe's directory. See
+# `.github/workflows/downstream.yml`.
+#
+# Each key is a recipe directory, each value the packages to test. A package must depend on
+# the recipe's JLL, directly or indirectly. Please keep the keys in alphabetical order.
+
+"B/brotli" = ["ChunkCodecLibBrotli"]

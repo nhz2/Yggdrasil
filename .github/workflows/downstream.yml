@@ -1,0 +1,102 @@
+# Runs the tests of the packages in `.github/downstream_tests.toml` against a pull request's
+# build of the recipes it changes. It runs the pull request's code, so it gets no secrets and
+# a read-only token.
+name: Downstream
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: downstream-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      recipes: ${{ steps.plan.outputs.recipes }}
+      packages: ${{ steps.plan.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr diff "${PR}" --repo "${GITHUB_REPOSITORY}" --name-only > "${RUNNER_TEMP}/changed"
+          julia --color=yes .github/downstream/plan.jl < "${RUNNER_TEMP}/changed"
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.recipes != '[]'
+    name: build ${{ matrix.recipe }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: ${{ fromJSON(needs.plan.outputs.recipes) }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: julia
+        run: echo "version=$(sed -n 's/^julia_version = "\(.*\)"$/\1/p' Manifest.toml)" >> "${GITHUB_OUTPUT}"
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: ${{ steps.julia.outputs.version }}
+      # Leave out artifacts and scratch spaces: they hold BinaryBuilder's compiler shards
+      # and source downloads, gigabytes per recipe.
+      - uses: julia-actions/cache@v3
+        with:
+          include-matrix: false
+          cache-artifacts: false
+          cache-scratchspaces: false
+      # BinaryBuilder's sandbox needs unprivileged user namespaces, which Ubuntu 24.04
+      # restricts through AppArmor.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: julia --color=yes --project=. -e 'using Pkg; Pkg.instantiate()'
+      - env:
+          RECIPE: ${{ matrix.recipe }}
+        run: julia --color=yes --project=. .github/downstream/build.jl "${RECIPE}" "${RUNNER_TEMP}/staged"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: staged-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/staged
+          retention-days: 1
+
+  test:
+    needs: [plan, build]
+    name: ${{ matrix.package }} (${{ matrix.platform.name }})
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.plan.outputs.packages) }}
+        # Keep in sync with TESTED in .github/downstream/build.jl.
+        platform:
+          - {name: x86_64-linux-gnu, os: ubuntu-latest, arch: x64}
+          - {name: i686-linux-gnu, os: ubuntu-latest, arch: x86}
+          - {name: aarch64-linux-gnu, os: ubuntu-24.04-arm, arch: aarch64}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/downstream
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: staged-*
+          merge-multiple: true
+          path: staged
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+          arch: ${{ matrix.platform.arch }}
+      - env:
+          JULIA_PKG_PRECOMPILE_AUTO: 0
+          PACKAGE: ${{ matrix.package }}
+        run: julia --color=yes .github/downstream/test.jl staged "${PACKAGE}"
