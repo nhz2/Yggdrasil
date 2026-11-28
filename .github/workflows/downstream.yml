@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       recipes: ${{ steps.plan.outputs.recipes }}
-      tests: ${{ steps.plan.outputs.tests }}
+      packages: ${{ steps.plan.outputs.packages }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -37,7 +37,7 @@ jobs:
   build:
     needs: plan
     if: needs.plan.outputs.recipes != '[]'
-    name: build ${{ matrix.recipe.dir }}
+    name: build ${{ matrix.recipe }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -55,22 +55,22 @@ jobs:
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: julia --color=yes --project=. -e 'using Pkg; Pkg.instantiate()'
       - env:
-          RECIPE: ${{ matrix.recipe.dir }}
+          RECIPE: ${{ matrix.recipe }}
         run: julia --color=yes --project=. .github/downstream/build.jl "${RECIPE}" "${RUNNER_TEMP}/staged"
       - uses: actions/upload-artifact@v4
         with:
-          name: staged-${{ matrix.recipe.key }}
+          name: staged-${{ strategy.job-index }}
           path: ${{ runner.temp }}/staged
           retention-days: 1
 
   test:
     needs: [plan, build]
-    name: ${{ matrix.test.package }} (${{ matrix.test.recipe }}, ${{ matrix.platform.name }})
+    name: ${{ matrix.package }} (${{ matrix.platform.name }})
     runs-on: ${{ matrix.platform.os }}
     strategy:
       fail-fast: false
       matrix:
-        test: ${{ fromJSON(needs.plan.outputs.tests) }}
+        package: ${{ fromJSON(needs.plan.outputs.packages) }}
         # Keep in sync with TESTED in .github/downstream/build.jl.
         platform:
           - {name: x86_64-linux-gnu, os: ubuntu-latest, arch: x64}
@@ -82,7 +82,8 @@ jobs:
           sparse-checkout: .github/downstream
       - uses: actions/download-artifact@v4
         with:
-          name: staged-${{ matrix.test.key }}
+          pattern: staged-*
+          merge-multiple: true
           path: staged
       - uses: julia-actions/setup-julia@v3
         with:
@@ -90,5 +91,5 @@ jobs:
           arch: ${{ matrix.platform.arch }}
       - env:
           JULIA_PKG_PRECOMPILE_AUTO: 0
-          PACKAGE: ${{ matrix.test.package }}
+          PACKAGE: ${{ matrix.package }}
         run: julia --color=yes .github/downstream/test.jl staged "${PACKAGE}"
