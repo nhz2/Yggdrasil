@@ -50,6 +50,13 @@ jobs:
       - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ steps.julia.outputs.version }}
+      # Leave out artifacts and scratch spaces: they hold BinaryBuilder's compiler shards
+      # and source downloads, gigabytes per recipe.
+      - uses: julia-actions/cache@v3
+        with:
+          include-matrix: false
+          cache-artifacts: false
+          cache-scratchspaces: false
       # BinaryBuilder's sandbox needs unprivileged user namespaces, which Ubuntu 24.04
       # restricts through AppArmor.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
