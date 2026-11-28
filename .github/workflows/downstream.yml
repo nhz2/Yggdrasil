@@ -1,0 +1,116 @@
+# Runs the tests of registered Julia packages against a pull request's build of the recipes
+# they depend on, on GitHub's runners. `.github/downstream_tests.toml` lists the packages to
+# test for each recipe directory; a pull request that changes nothing listed there runs only
+# the `plan` job.
+#
+# The pull request's recipe is built here with `--deploy=local`, for the platforms that the
+# `test` matrix covers, and each test installs the resulting artifacts from those tarballs.
+# This runs the pull request's code, as any pull_request workflow does, so it gets no
+# secrets and a read-only token.
+name: Downstream
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      recipes:
+        description: 'Recipe directories to test, separated by spaces, e.g. "B/brotli"'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: downstream-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      recipes: ${{ steps.plan.outputs.recipes }}
+      tests: ${{ steps.plan.outputs.tests }}
+      julia_version: ${{ steps.plan.outputs.julia_version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            .github
+            Manifest.toml
+          sparse-checkout-cone-mode: false
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          RECIPES: ${{ inputs.recipes }}
+        run: |
+          if [[ -n "${PR}" ]]; then
+              gh pr diff "${PR}" --repo "${GITHUB_REPOSITORY}" --name-only
+          else
+              tr ' ' '\n' <<< "${RECIPES}"
+          fi | julia --color=yes .github/downstream/plan.jl
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.recipes != '[]'
+    name: build ${{ matrix.recipe.dir }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: ${{ fromJSON(needs.plan.outputs.recipes) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: ${{ needs.plan.outputs.julia_version }}
+      # BinaryBuilder's sandbox needs unprivileged user namespaces, which Ubuntu 24.04
+      # restricts through AppArmor.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: julia --color=yes --project=. -e 'using Pkg; Pkg.instantiate()'
+      - env:
+          RECIPE: ${{ matrix.recipe.dir }}
+        run: julia --color=yes --project=. .github/downstream/build.jl "${RECIPE}" "${RUNNER_TEMP}/staged"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: staged-${{ matrix.recipe.key }}
+          path: ${{ runner.temp }}/staged
+          retention-days: 7
+
+  test:
+    needs: [plan, build]
+    name: ${{ matrix.test.package }} (${{ matrix.test.recipe }}, ${{ matrix.platform.name }})
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        test: ${{ fromJSON(needs.plan.outputs.tests) }}
+        # Keep in sync with TESTED in .github/downstream/build.jl.
+        platform:
+          - {name: x86_64-linux-gnu, os: ubuntu-latest, arch: x64}
+          - {name: i686-linux-gnu, os: ubuntu-latest, arch: x86}
+          - {name: aarch64-linux-gnu, os: ubuntu-24.04-arm, arch: aarch64}
+          - {name: x86_64-apple-darwin, os: macos-15-intel, arch: x64}
+          - {name: aarch64-apple-darwin, os: macos-latest, arch: aarch64}
+          - {name: x86_64-w64-mingw32, os: windows-latest, arch: x64}
+          - {name: i686-w64-mingw32, os: windows-latest, arch: x86}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/downstream
+      - uses: actions/download-artifact@v4
+        with:
+          name: staged-${{ matrix.test.key }}
+          path: staged
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+          arch: ${{ matrix.platform.arch }}
+      - env:
+          JULIA_PKG_PRECOMPILE_AUTO: 0
+          PACKAGE: ${{ matrix.test.package }}
+        shell: bash
+        run: julia --color=yes .github/downstream/test.jl staged "${PACKAGE}"
