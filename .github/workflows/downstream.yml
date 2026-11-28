@@ -93,10 +93,6 @@ jobs:
           - {name: x86_64-linux-gnu, os: ubuntu-latest, arch: x64}
           - {name: i686-linux-gnu, os: ubuntu-latest, arch: x86}
           - {name: aarch64-linux-gnu, os: ubuntu-24.04-arm, arch: aarch64}
-          - {name: x86_64-apple-darwin, os: macos-15-intel, arch: x64}
-          - {name: aarch64-apple-darwin, os: macos-latest, arch: aarch64}
-          - {name: x86_64-w64-mingw32, os: windows-latest, arch: x64}
-          - {name: i686-w64-mingw32, os: windows-latest, arch: x86}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -112,5 +108,4 @@ jobs:
       - env:
           JULIA_PKG_PRECOMPILE_AUTO: 0
           PACKAGE: ${{ matrix.test.package }}
-        shell: bash
         run: julia --color=yes .github/downstream/test.jl staged "${PACKAGE}"

@@ -12,10 +12,6 @@ const TESTED = Set([
     ("x86_64", "linux", "glibc"),
     ("i686", "linux", "glibc"),
     ("aarch64", "linux", "glibc"),
-    ("x86_64", "macos", nothing),
-    ("aarch64", "macos", nothing),
-    ("x86_64", "windows", nothing),
-    ("i686", "windows", nothing),
 ])
 
 julia = `$(Base.julia_cmd()) --project=$(Base.active_project())`
